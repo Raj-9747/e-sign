@@ -1,0 +1,132 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Signature Pad</title>
+  <style>
+    body { font-family: Inter, Arial, sans-serif; background: #f6f8fa; margin: 0; }
+    .card { max-width: 400px; margin: 40px auto; background: #fff; border-radius: 16px; box-shadow: 0 4px 24px rgba(60,72,88,0.08); padding: 2em; }
+    .sig-container { border: 2px solid #2563eb; border-radius: 12px; background: #f3f4f6; }
+    canvas { width: 100%; height: 200px; display: block; border-radius: 12px; }
+    .btn-row { display: flex; gap: 1em; margin-top: 1em; }
+    button { padding: 0.7em 1.5em; border: none; border-radius: 8px; background: #2563eb; color: #fff; font-weight: 600; cursor: pointer; transition: background 0.2s; }
+    button:hover { background: #1e40af; }
+    .status { margin-top: 1em; font-size: 1em; }
+    .saved-signature { margin-top: 1.5em; text-align: center; }
+    .saved-signature img { max-width: 100%; border: 1px solid #e5e7eb; border-radius: 8px; background: #fff; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <h2>Sign Below</h2>
+    <div class="sig-container">
+      <canvas id="signature-pad"></canvas>
+    </div>
+    <div class="btn-row">
+      <button id="clear-btn">Clear</button>
+      <button id="save-btn">Save Signature</button>
+    </div>
+    <div class="status" id="status"></div>
+    <div class="saved-signature" id="saved-signature"></div>
+  </div>
+  <script src="https://cdn.jsdelivr.net/npm/signature_pad@4.1.7/dist/signature_pad.umd.min.js"></script>
+  <script>
+    // Configure your n8n webhook URL here
+    const N8N_SIGNATURE_WEBHOOK_URL = 'https://n8n.srv898271.hstgr.cloud/webhook/8635994c-e9ab-483e-a368-b8467ce1d3db';
+
+    const canvas = document.getElementById('signature-pad');
+    const signaturePad = new SignaturePad(canvas, { backgroundColor: '#f3f4f6' });
+
+    // Resize canvas to fit container
+    function resizeCanvas() {
+      const ratio = Math.max(window.devicePixelRatio || 1, 1);
+      canvas.width = canvas.offsetWidth * ratio;
+      canvas.height = 200 * ratio;
+      canvas.getContext("2d").scale(ratio, ratio);
+      signaturePad.clear();
+    }
+    window.addEventListener("resize", resizeCanvas);
+    resizeCanvas();
+
+    document.getElementById('clear-btn').onclick = () => signaturePad.clear();
+
+    // The localStorage functionality is kept as a convenience for the user
+    function loadSavedSignature() {
+      const saved = localStorage.getItem('signature');
+      const container = document.getElementById('saved-signature');
+      if (saved) {
+        container.innerHTML = `<div>Saved Signature:</div><img src="${saved}" alt="Saved Signature" />`;
+      } else {
+        container.innerHTML = '';
+      }
+    }
+    loadSavedSignature();
+
+    document.getElementById('save-btn').onclick = async () => {
+      if (signaturePad.isEmpty()) {
+        document.getElementById('status').textContent = "❌ Please provide a signature.";
+        return;
+      }
+      document.getElementById('status').textContent = "⏳ Saving...";
+      const dataURL = signaturePad.toDataURL("image/png");
+
+      localStorage.setItem('signature', dataURL);
+      loadSavedSignature();
+      document.getElementById('status').textContent = "✅ Signature saved!";
+
+      const link = document.createElement('a');
+      link.href = dataURL;
+      link.download = 'signature.png';
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      
+      if (N8N_SIGNATURE_WEBHOOK_URL) {
+        try {
+          // --- MODIFICATION START ---
+          // 1. Get the token from the browser's URL
+          const urlParams = new URLSearchParams(window.location.search);
+          const token = urlParams.get('token');
+
+          // 2. Check if the token exists. If not, show an error and stop.
+          if (!token) {
+            document.getElementById('status').textContent = '❌ Error: Signing token is missing from the URL.';
+            return; // Stop the function here
+          }
+
+          // 3. Construct the full webhook URL with the token as a query parameter
+          const urlWithToken = `${N8N_SIGNATURE_WEBHOOK_URL}?token=${token}`;
+          // --- MODIFICATION END ---
+          
+          function dataURLtoBlob(dataurl) {
+            const arr = dataurl.split(','), mime = arr[0].match(/:(.*?);/)[1], bstr = atob(arr[1]), n = bstr.length, u8arr = new Uint8Array(n);
+            for (let i = 0; i < n; i++) u8arr[i] = bstr.charCodeAt(i);
+            return new Blob([u8arr], { type: mime });
+          }
+          const blob = dataURLtoBlob(dataURL);
+          const formData = new FormData();
+          formData.append('file', blob, 'signature.png');
+
+          // Use the new dynamic URL in the fetch call
+          fetch(urlWithToken, {
+            method: 'POST',
+            body: formData
+          }).then(async res => {
+            if (res.ok) {
+              document.getElementById('status').textContent = '✅ Signature successfully uploaded!';
+            } else {
+              document.getElementById('status').textContent = '⚠️ Saved locally, but upload failed (server error).';
+            }
+          }).catch(err => {
+            console.warn('Upload error', err);
+            document.getElementById('status').textContent = '⚠️ Saved locally, but upload failed (network error).';
+          });
+        } catch (e) {
+          console.warn('Upload exception', e);
+          document.getElementById('status').textContent = '⚠️ Saved locally, but upload failed.';
+        }
+      }
+    };
+  </script>
+</body>
+</html>
