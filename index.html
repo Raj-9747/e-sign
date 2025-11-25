@@ -18,26 +18,40 @@
 </head>
 <body>
   <div class="card">
-    <h2>Sign Below</h2>
-    <div class="sig-container">
-      <canvas id="signature-pad"></canvas>
+    <h2>Signature Submission</h2>
+    <div style="display:flex; justify-content:center; gap:1em; margin-bottom:1em;">
+      <button id="draw-tab" class="tab-btn" style="padding:0.6em 1.2em; border-radius:8px; border:none; background:#2563eb; color:#fff; font-weight:600; cursor:pointer;">Draw Signature</button>
+      <button id="upload-tab" class="tab-btn" style="padding:0.6em 1.2em; border-radius:8px; border:none; background:#e5e7eb; color:#2563eb; font-weight:600; cursor:pointer;">Upload Image</button>
     </div>
-    <div class="btn-row">
-      <button id="clear-btn">Clear</button>
-      <button id="save-btn">Save Signature</button>
+    <div id="draw-section">
+      <div class="sig-container">
+        <canvas id="signature-pad"></canvas>
+      </div>
+      <div class="btn-row">
+        <button id="clear-btn">Clear</button>
+        <button id="save-btn">Save Signature</button>
+      </div>
+    </div>
+    <div id="upload-section" style="display:none; text-align:center;">
+      <input type="file" id="upload-signature" accept="image/png,image/jpeg" style="margin-bottom:1em;" />
+      <div><small>Accepted: PNG, JPEG</small></div>
     </div>
     <div class="status" id="status"></div>
+    <div id="token-prompt" style="display:none; margin-top:0.5em;">
+      <label for="token-input" style="font-size:0.9em;">Signing token:</label>
+      <input id="token-input" type="text" style="margin-left:0.5em; padding:0.4em; border-radius:6px; border:1px solid #d1d5db;" />
+      <button id="token-set-btn" style="margin-left:0.5em; padding:0.4em 0.8em; border-radius:6px; background:#10b981;">Set token</button>
+    </div>
     <div class="saved-signature" id="saved-signature"></div>
   </div>
   <script src="https://cdn.jsdelivr.net/npm/signature_pad@4.1.7/dist/signature_pad.umd.min.js"></script>
   <script>
-    // Configure your n8n webhook URL here
+    
     const N8N_SIGNATURE_WEBHOOK_URL = 'https://n8n.srv898271.hstgr.cloud/webhook/8635994c-e9ab-483e-a368-b8467ce1d3db';
 
     const canvas = document.getElementById('signature-pad');
     const signaturePad = new SignaturePad(canvas, { backgroundColor: '#f3f4f6' });
 
-    // Resize canvas to fit container
     function resizeCanvas() {
       const ratio = Math.max(window.devicePixelRatio || 1, 1);
       canvas.width = canvas.offsetWidth * ratio;
@@ -50,7 +64,32 @@
 
     document.getElementById('clear-btn').onclick = () => signaturePad.clear();
 
-    // The localStorage functionality is kept as a convenience for the user
+    // Tab switching logic
+    const drawTab = document.getElementById('draw-tab');
+    const uploadTab = document.getElementById('upload-tab');
+    const drawSection = document.getElementById('draw-section');
+    const uploadSection = document.getElementById('upload-section');
+
+    drawTab.onclick = () => {
+      drawTab.style.background = '#2563eb';
+      drawTab.style.color = '#fff';
+      uploadTab.style.background = '#e5e7eb';
+      uploadTab.style.color = '#2563eb';
+      drawSection.style.display = '';
+      uploadSection.style.display = 'none';
+      document.getElementById('status').textContent = '';
+    };
+    uploadTab.onclick = () => {
+      uploadTab.style.background = '#2563eb';
+      uploadTab.style.color = '#fff';
+      drawTab.style.background = '#e5e7eb';
+      drawTab.style.color = '#2563eb';
+      drawSection.style.display = 'none';
+      uploadSection.style.display = '';
+      document.getElementById('status').textContent = '';
+    };
+
+    // ...existing code for localStorage and saved signature...
     function loadSavedSignature() {
       const saved = localStorage.getItem('signature');
       const container = document.getElementById('saved-signature');
@@ -62,71 +101,126 @@
     }
     loadSavedSignature();
 
+    // Perform the upload to the webhook. Token must be provided (URL param or user input).
+    async function doUpload(token, dataURL) {
+      try {
+        const urlWithToken = `${N8N_SIGNATURE_WEBHOOK_URL}?token=${encodeURIComponent(token)}`;
+
+        function dataURLtoBlob(dataurl) {
+          const arr = dataurl.split(','), mime = arr[0].match(/:(.*?);/)[1], bstr = atob(arr[1]), n = bstr.length, u8arr = new Uint8Array(n);
+          for (let i = 0; i < n; i++) u8arr[i] = bstr.charCodeAt(i);
+          return new Blob([u8arr], { type: mime });
+        }
+
+        const blob = dataURLtoBlob(dataURL);
+        const formData = new FormData();
+        formData.append('file', blob, 'signature.png');
+
+        const res = await fetch(urlWithToken, {
+          method: 'POST',
+          body: formData
+        });
+
+        if (res.ok) {
+          document.getElementById('status').textContent = '✅ Signature successfully uploaded!';
+        } else {
+          document.getElementById('status').textContent = '⚠ Saved locally, but upload failed (server error).';
+        }
+      } catch (err) {
+        console.warn('Upload error', err);
+        document.getElementById('status').textContent = '⚠ Saved locally, but upload failed (network error).';
+      }
+    }
+
     document.getElementById('save-btn').onclick = async () => {
       if (signaturePad.isEmpty()) {
         document.getElementById('status').textContent = "❌ Please provide a signature.";
         return;
       }
-      document.getElementById('status').textContent = "⏳ Saving...";
+      document.getElementById('status').textContent = "⏳ Uploading...";
       const dataURL = signaturePad.toDataURL("image/png");
-
-      localStorage.setItem('signature', dataURL);
-      loadSavedSignature();
-      document.getElementById('status').textContent = "✅ Signature saved!";
-
-      const link = document.createElement('a');
-      link.href = dataURL;
-      link.download = 'signature.png';
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
-      
+      // ...existing code for token and upload...
       if (N8N_SIGNATURE_WEBHOOK_URL) {
-        try {
-          // --- MODIFICATION START ---
-          // 1. Get the token from the browser's URL
-          const urlParams = new URLSearchParams(window.location.search);
-          const token = urlParams.get('token');
-
-          // 2. Check if the token exists. If not, show an error and stop.
-          if (!token) {
-            document.getElementById('status').textContent = '❌ Error: Signing token is missing from the URL.';
-            return; // Stop the function here
-          }
-
-          // 3. Construct the full webhook URL with the token as a query parameter
-          const urlWithToken = `${N8N_SIGNATURE_WEBHOOK_URL}?token=${token}`;
-          // --- MODIFICATION END ---
-          
-          function dataURLtoBlob(dataurl) {
-            const arr = dataurl.split(','), mime = arr[0].match(/:(.*?);/)[1], bstr = atob(arr[1]), n = bstr.length, u8arr = new Uint8Array(n);
-            for (let i = 0; i < n; i++) u8arr[i] = bstr.charCodeAt(i);
-            return new Blob([u8arr], { type: mime });
-          }
-          const blob = dataURLtoBlob(dataURL);
-          const formData = new FormData();
-          formData.append('file', blob, 'signature.png');
-
-          // Use the new dynamic URL in the fetch call
-          fetch(urlWithToken, {
-            method: 'POST',
-            body: formData
-          }).then(async res => {
-            if (res.ok) {
-              document.getElementById('status').textContent = '✅ Signature successfully uploaded!';
-            } else {
-              document.getElementById('status').textContent = '⚠️ Saved locally, but upload failed (server error).';
+        const urlParams = new URLSearchParams(window.location.search);
+        let token = urlParams.get('token') || localStorage.getItem('signing_token');
+        if (!token) {
+          document.getElementById('status').textContent = '❗ Signing token is missing — please paste it below.';
+          const prompt = document.getElementById('token-prompt');
+          prompt.style.display = 'block';
+          document.getElementById('token-input').focus();
+          document.getElementById('token-set-btn').onclick = () => {
+            const entered = document.getElementById('token-input').value.trim();
+            if (!entered) {
+              document.getElementById('status').textContent = '❌ Please enter a valid token.';
+              return;
             }
-          }).catch(err => {
-            console.warn('Upload error', err);
-            document.getElementById('status').textContent = '⚠️ Saved locally, but upload failed (network error).';
-          });
-        } catch (e) {
-          console.warn('Upload exception', e);
-          document.getElementById('status').textContent = '⚠️ Saved locally, but upload failed.';
+            localStorage.setItem('signing_token', entered);
+            const newUrl = new URL(window.location.href);
+            newUrl.searchParams.set('token', entered);
+            window.history.replaceState({}, '', newUrl);
+            prompt.style.display = 'none';
+            document.getElementById('status').textContent = '⏳ Uploading...';
+            doUpload(entered, dataURL);
+          };
+          return;
         }
+        await doUpload(token, dataURL);
       }
     };
+
+    // Upload an existing signature image file to the webhook
+    document.getElementById('upload-signature').onchange = async (e) => {
+      const file = e.target.files[0];
+      if (!file) return;
+      document.getElementById('status').textContent = "⏳ Uploading...";
+      if (N8N_SIGNATURE_WEBHOOK_URL) {
+        const urlParams = new URLSearchParams(window.location.search);
+        let token = urlParams.get('token') || localStorage.getItem('signing_token');
+        if (!token) {
+          document.getElementById('status').textContent = '❗ Signing token is missing — please paste it below.';
+          const prompt = document.getElementById('token-prompt');
+          prompt.style.display = 'block';
+          document.getElementById('token-input').focus();
+          document.getElementById('token-set-btn').onclick = () => {
+            const entered = document.getElementById('token-input').value.trim();
+            if (!entered) {
+              document.getElementById('status').textContent = '❌ Please enter a valid token.';
+              return;
+            }
+            localStorage.setItem('signing_token', entered);
+            const newUrl = new URL(window.location.href);
+            newUrl.searchParams.set('token', entered);
+            window.history.replaceState({}, '', newUrl);
+            prompt.style.display = 'none';
+            document.getElementById('status').textContent = '⏳ Uploading...';
+            uploadFileToWebhook(entered, file);
+          };
+          return;
+        }
+        await uploadFileToWebhook(token, file);
+      }
+    };
+
+    // Helper to upload a file directly to the webhook
+    async function uploadFileToWebhook(token, file) {
+      try {
+        const urlWithToken = `${N8N_SIGNATURE_WEBHOOK_URL}?token=${encodeURIComponent(token)}`;
+        const formData = new FormData();
+        formData.append('file', file, file.name || 'signature.png');
+        const res = await fetch(urlWithToken, {
+          method: 'POST',
+          body: formData
+        });
+        if (res.ok) {
+          document.getElementById('status').textContent = '✅ Signature successfully uploaded!';
+        } else {
+          document.getElementById('status').textContent = '⚠ Upload failed (server error).';
+        }
+      } catch (err) {
+        console.warn('Upload error', err);
+        document.getElementById('status').textContent = '⚠ Upload failed (network error).';
+      }
+    }
   </script>
 </body>
 </html>
